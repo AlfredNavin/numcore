@@ -1,4 +1,5 @@
 #include "numcore/matrix.hpp"
+#include "matrix_printer.hpp"
 
 #include <gtest/gtest.h>
 

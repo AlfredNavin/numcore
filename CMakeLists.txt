@@ -19,6 +19,8 @@ endif()
 # ---- Library -----------------------------------------------------------------
 add_library(numcore
   src/version.cpp
+  src/matmul.cpp
+        include/numcore/matmul.hpp
 )
 add_library(numcore::numcore ALIAS numcore)
 
