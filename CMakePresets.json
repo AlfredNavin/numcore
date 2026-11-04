@@ -15,7 +15,10 @@
       "displayName": "Debug",
       "inherits": "base",
       "binaryDir": "${sourceDir}/debug-build",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NUMCORE_BUILD_BENCHMARKS": "OFF"
+      }
     },
     {
       "name": "release",

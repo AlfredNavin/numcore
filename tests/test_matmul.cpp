@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <random>
 #include <stdexcept>
 
 using numcore::Matrix;
@@ -188,4 +189,78 @@ TEST(MultiplyNaive, ShapeMismatchThrowsEvenWhenReverseWorks) {
   Matrix B(3, 2);
   EXPECT_THROW(multiply_naive(A, B), std::invalid_argument);
   EXPECT_NO_THROW(multiply_naive(transpose(A), B));
+}
+
+// =============================================================================
+// Version 2: multiply_ikj
+// =============================================================================
+// Strategy: multiply_naive is already tested and trusted, so the simplest
+// strong test for every new version is "gives the same answer as naive".
+// Use non-square shapes with all-different sizes, so a mixed-up index can't
+// hide. Small integer inputs keep everything exact, so EXPECT_EQ is safe.
+//
+using numcore::approx_equal;
+using numcore::multiply_ikj;
+
+TEST(MultiplyIkj, HandChecked2x2) {
+  Matrix A{{1, 2},
+           {3, 4}};
+  Matrix B{{5, 6},
+           {7, 8}};
+  Matrix expected{{19, 22},
+                  {43, 50}};
+
+  EXPECT_EQ(multiply_ikj(A, B), expected);
+}
+
+TEST(MultiplyIkj, MatchesNaiveOnNonSquare) {
+  // (5x7) * (7x4): every dimension different, so a swapped index can't hide.
+  Matrix A = make_int_matrix(5, 7, 1);
+  Matrix B = make_int_matrix(7, 4, 2);
+
+  EXPECT_EQ(multiply_ikj(A, B), multiply_naive(A, B));
+}
+
+TEST(MultiplyIkj, MatchesNaiveOnVectorShapes) {
+  Matrix row = make_int_matrix(1, 6, 3);
+  Matrix col = make_int_matrix(6, 1, 4);
+
+  EXPECT_EQ(multiply_ikj(row, col), multiply_naive(row, col));  // 1x1 (dot product)
+  EXPECT_EQ(multiply_ikj(col, row), multiply_naive(col, row));  // 6x6 (outer product)
+}
+
+TEST(MultiplyIkj, MatchesNaiveOnRandomReals) {
+  // Real-valued inputs, like the benchmark uses. Compared with approx_equal,
+  // not ==: later versions (tiled, threaded, -march=native with FMA) may add
+  // in a different order and differ in the last few bits, so every version
+  // gets checked the same tolerant way.
+  std::mt19937 rng(42);
+  std::uniform_real_distribution<double> dist(-1.0, 1.0);
+  Matrix A(37, 53);
+  Matrix B(53, 29);
+  for (std::size_t i = 0; i < A.rows(); ++i)
+    for (std::size_t j = 0; j < A.cols(); ++j) A(i, j) = dist(rng);
+  for (std::size_t i = 0; i < B.rows(); ++i)
+    for (std::size_t j = 0; j < B.cols(); ++j) B(i, j) = dist(rng);
+
+  EXPECT_TRUE(approx_equal(multiply_ikj(A, B), multiply_naive(A, B)));
+}
+
+TEST(MultiplyIkj, IdentityLeavesMatrixUnchanged) {
+  Matrix A{{1, -2, 3},
+           {4, 5, -6}};
+
+  EXPECT_EQ(multiply_ikj(A, Matrix::identity(3)), A);
+  EXPECT_EQ(multiply_ikj(Matrix::identity(2), A), A);
+}
+
+TEST(MultiplyIkj, EmptyInnerDimensionGivesZeros) {
+  EXPECT_EQ(multiply_ikj(Matrix(2, 0), Matrix(0, 3)), Matrix(2, 3));
+}
+
+TEST(MultiplyIkj, ShapeMismatchThrows) {
+  Matrix A(2, 3);
+  Matrix B(2, 3);
+
+  EXPECT_THROW(multiply_ikj(A, B), std::invalid_argument);
 }

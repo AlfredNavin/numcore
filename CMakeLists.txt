@@ -3,6 +3,7 @@ project(numcore VERSION 0.1.0 LANGUAGES CXX)
 
 # ---- Options ----------------------------------------------------------------
 option(NUMCORE_BUILD_TESTS "Build the unit tests" ON)
+option(NUMCORE_BUILD_BENCHMARKS "Build the Google Benchmark programs" ON)
 # Off by default on purpose: P1 measures what these flags do.
 option(NUMCORE_NATIVE "Compile with -O3 -march=native" OFF)
 
@@ -47,4 +48,21 @@ if(NUMCORE_BUILD_TESTS)
   FetchContent_MakeAvailable(googletest)
 
   add_subdirectory(tests)
+endif()
+
+# ---- Benchmarks --------------------------------------------------------------
+if(NUMCORE_BUILD_BENCHMARKS)
+  include(FetchContent)
+  FetchContent_Declare(
+    googlebenchmark
+    URL https://github.com/google/benchmark/archive/refs/tags/v1.9.1.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  # Only build the library: skip Google Benchmark's own tests and install rules.
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googlebenchmark)
+
+  add_subdirectory(bench)
 endif()

@@ -28,8 +28,16 @@ namespace numcore {
 //   ;                 -> ends the declaration (no body here!)
 Matrix multiply_naive(const Matrix& A, const Matrix& B);
 
+// C = A * B with the two inner loops swapped: i-k-j order.  (P1 version 2)
+//
+// Same result as multiply_naive (each C(i,j) still adds its terms in the
+// same p order), but the innermost loop now walks along a ROW of B and a ROW
+// of C, which sit next to each other in memory.
+//
+// Throws std::invalid_argument if A.cols() != B.rows().
+Matrix multiply_ikj(const Matrix& A, const Matrix& B);
+
 // Later P1 versions get declared here too, e.g.:
-// Matrix multiply_ikj(const Matrix& A, const Matrix& B);      // version 2
 // Matrix multiply_tiled(const Matrix& A, const Matrix& B);    // version 3
 
 }  // namespace numcore
