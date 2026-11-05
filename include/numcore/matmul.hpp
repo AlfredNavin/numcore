@@ -37,7 +37,25 @@ Matrix multiply_naive(const Matrix& A, const Matrix& B);
 // Throws std::invalid_argument if A.cols() != B.rows().
 Matrix multiply_ikj(const Matrix& A, const Matrix& B);
 
-// Later P1 versions get declared here too, e.g.:
-// Matrix multiply_tiled(const Matrix& A, const Matrix& B);    // version 3
+// C = A * B using cache blocking (tiling).  (P1 version 3)
+//
+// Splits the work into tile x tile blocks small enough to stay in the fast
+// caches, and finishes all the work on one block of C before moving on, so
+// each number loaded from memory gets reused many times while it's still
+// close to the CPU. Inside a block it uses the i-k-j order from version 2.
+//
+// `tile` is the block edge length in elements. Three tile x tile blocks of
+// doubles need 3 * tile^2 * 8 bytes, so roughly:
+//   tile = 32  -> 24 KB  (fits L1, 48 KB on this machine)
+//   tile = 128 -> 384 KB (fits L2, 1.25 MB on this machine)
+// Default 128: the most consistent in benchmarks on this machine (i7-12700H,
+// Release, no -march=native). Re-check after version 4 changes the compiler flags.
+// Matrix sizes don't need to be multiples of `tile`: edge blocks are smaller.
+//
+// Same result as multiply_naive (each C(i,j) still adds its terms in the
+// same p order).
+//
+// Throws std::invalid_argument if A.cols() != B.rows() or tile == 0.
+Matrix multiply_tiled(const Matrix& A, const Matrix& B, std::size_t tile = 128);
 
 }  // namespace numcore

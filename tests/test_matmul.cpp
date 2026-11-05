@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 using numcore::Matrix;
 using numcore::multiply_naive;
@@ -263,4 +264,84 @@ TEST(MultiplyIkj, ShapeMismatchThrows) {
   Matrix B(2, 3);
 
   EXPECT_THROW(multiply_ikj(A, B), std::invalid_argument);
+}
+
+// =============================================================================
+// Version 3: multiply_tiled
+// =============================================================================
+// Tiling has a new way to go wrong: the EDGES. When the matrix size isn't a
+// multiple of the tile size, the last block in each direction is smaller, and
+// an off-by-one there either skips entries or runs off the end. So these tests
+// use awkward sizes (37, 53, 29: primes) and many tile sizes, including ones
+// that don't divide the sizes, tile = 1, and tiles bigger than the matrix.
+
+using numcore::multiply_tiled;
+
+TEST(MultiplyTiled, HandChecked2x2) {
+  Matrix A{{1, 2},
+           {3, 4}};
+  Matrix B{{5, 6},
+           {7, 8}};
+  Matrix expected{{19, 22},
+                  {43, 50}};
+
+  EXPECT_EQ(multiply_tiled(A, B), expected);     // default tile (128) > matrix size
+  EXPECT_EQ(multiply_tiled(A, B, 1), expected);  // every block is 1x1
+}
+
+TEST(MultiplyTiled, MatchesNaiveForManyTileSizes) {
+  // (37x53) * (53x29): no tile size below divides all three evenly, so every
+  // run exercises partial edge blocks.
+  Matrix A = make_int_matrix(37, 53, 1);
+  Matrix B = make_int_matrix(53, 29, 2);
+  const Matrix expected = multiply_naive(A, B);
+
+  for (std::size_t tile : {1u, 2u, 3u, 7u, 8u, 16u, 29u, 37u, 53u, 64u, 1000u}) {
+    // SCOPED_TRACE adds "tile = ..." to any failure message, so you can see
+    // which tile size broke.
+    SCOPED_TRACE("tile = " + std::to_string(tile));
+    EXPECT_EQ(multiply_tiled(A, B, tile), expected);
+  }
+}
+
+TEST(MultiplyTiled, MatchesNaiveOnRandomReals) {
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<double> dist(-1.0, 1.0);
+  Matrix A(70, 45);
+  Matrix B(45, 90);
+  for (std::size_t i = 0; i < A.rows(); ++i)
+    for (std::size_t j = 0; j < A.cols(); ++j) A(i, j) = dist(rng);
+  for (std::size_t i = 0; i < B.rows(); ++i)
+    for (std::size_t j = 0; j < B.cols(); ++j) B(i, j) = dist(rng);
+
+  EXPECT_TRUE(approx_equal(multiply_tiled(A, B, 16), multiply_naive(A, B)));
+}
+
+TEST(MultiplyTiled, MatchesNaiveOnVectorShapes) {
+  Matrix row = make_int_matrix(1, 6, 3);
+  Matrix col = make_int_matrix(6, 1, 4);
+
+  EXPECT_EQ(multiply_tiled(row, col, 4), multiply_naive(row, col));  // 1x1
+  EXPECT_EQ(multiply_tiled(col, row, 4), multiply_naive(col, row));  // 6x6
+}
+
+TEST(MultiplyTiled, IdentityLeavesMatrixUnchanged) {
+  Matrix A{{1, -2, 3},
+           {4, 5, -6}};
+
+  EXPECT_EQ(multiply_tiled(A, Matrix::identity(3), 2), A);
+  EXPECT_EQ(multiply_tiled(Matrix::identity(2), A, 2), A);
+}
+
+TEST(MultiplyTiled, EmptyInnerDimensionGivesZeros) {
+  EXPECT_EQ(multiply_tiled(Matrix(2, 0), Matrix(0, 3)), Matrix(2, 3));
+}
+
+TEST(MultiplyTiled, ShapeMismatchThrows) {
+  EXPECT_THROW(multiply_tiled(Matrix(2, 3), Matrix(2, 3)), std::invalid_argument);
+}
+
+TEST(MultiplyTiled, ZeroTileThrows) {
+  // tile = 0 would make the block loops step by 0 and never finish.
+  EXPECT_THROW(multiply_tiled(Matrix(2, 2), Matrix(2, 2), 0), std::invalid_argument);
 }

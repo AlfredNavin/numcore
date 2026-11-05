@@ -1,5 +1,6 @@
 .venv/
 build/
+build-native/
 debug-build/
 cmake-build-*/
 .idea/

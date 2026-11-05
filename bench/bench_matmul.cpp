@@ -72,11 +72,27 @@ void BM_Naive(benchmark::State& state) { run_matmul(state, numcore::multiply_nai
 
 // Sizes from the plan: 256/512/1024 now, 2048 for the final chart.
 // (2048 naive can take a minute per run; add ->Arg(2048) when you're ready.)
-BENCHMARK(BM_Naive)->Arg(256)->Arg(512)->Arg(1024)->Arg(2048)->Arg(4096)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_Naive)->Arg(256)->Arg(512)->Arg(1024)->Unit(benchmark::kMillisecond);
 
 // ---- Version 2: i-k-j -----------------------------------------------------------
 void BM_Ikj(benchmark::State& state) { run_matmul(state, numcore::multiply_ikj); }
-BENCHMARK(BM_Ikj)->Arg(256)->Arg(512)->Arg(1024)->Arg(2048)->Arg(4096)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_Ikj)->Arg(256)->Arg(512)->Arg(1024)->Arg(2048)->Unit(benchmark::kMillisecond);
+
+// ---- Version 3: cache blocking (tiling) ---------------------------------------
+// Two arguments per run: matrix size n and tile size T, so you can see which
+// tile size suits this CPU's caches. ArgsProduct runs every combination.
+// (multiply_tiled takes a 3rd parameter, so it's wrapped in a lambda that
+// fixes the tile size; run_matmul only ever passes A and B.)
+void BM_Tiled(benchmark::State& state) {
+  const auto tile = static_cast<std::size_t>(state.range(1));
+  run_matmul(state, [tile](const Matrix& A, const Matrix& B) {
+    return numcore::multiply_tiled(A, B, tile);
+  });
+}
+BENCHMARK(BM_Tiled)
+    ->ArgsProduct({{256, 512, 1024, 2048}, {16, 32, 64, 128, 256}})
+    ->ArgNames({"n", "tile"})
+    ->Unit(benchmark::kMillisecond);
 
 }  // namespace
 

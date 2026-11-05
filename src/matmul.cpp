@@ -6,6 +6,7 @@
 // ----------------------------------------------------------------------------
 #include "numcore/matmul.hpp"
 
+#include <algorithm>  // std::min
 #include <cstddef>    // std::size_t
 #include <stdexcept>  // std::invalid_argument
 #include <string>     // std::string, std::to_string
@@ -119,6 +120,82 @@ Matrix multiply_ikj(const Matrix& A, const Matrix& B) {
       const double a = A(i, p);
       for (std::size_t j = 0; j < m; ++j) {    // walk ALONG row p of B and row i of C
         C(i, j) += a * B(p, j);
+      }
+    }
+  }
+
+  // ---- 5. Return the result ----------------------------------------------------
+  return C;
+}
+
+// ============================================================================
+// Version 3: cache blocking (tiling)
+// ============================================================================
+//
+// The problem i-k-j still has: for EVERY row i of A it walks through ALL of B.
+// At 1024, B is 8 MB, far bigger than L1 (48 KB) or L2 (1.25 MB), so B gets
+// streamed in from L3 (or RAM, at 2048) a thousand times over. Each number of
+// B is used once and then pushed out of the fast caches long before it's
+// needed again.
+//
+// The fix: cut the matrices into small square blocks ("tiles") and do all the
+// work for one block of C before moving on. With T = tile size:
+//
+//   for each T x T block of C   (ii, jj)
+//     for each T-wide strip of the inner dimension   (pp)
+//       C_block += A_block(ii, pp) * B_block(pp, jj)    <- small i-k-j multiply
+//
+// The C block stays in fast cache the whole time it's being built up, and
+// each A block and B block is small enough to stay there while it's used
+// T times. That's TEMPORAL locality: reuse data while it's still close.
+// (Version 2 was SPATIAL locality: use the neighbours in each cache line.)
+//
+// 6 loops instead of 3:
+//   - outer 3 (ii, jj, pp) pick which blocks to work on, stepping by T
+//   - inner 3 (i, p, j) are the i-k-j multiply, but only inside the blocks
+//
+// Edges: if n isn't a multiple of T (e.g. n = 1000, T = 64), the last block
+// in each direction is smaller. std::min(ii + T, n) stops the inner loop at
+// the real edge instead of running off the end of the matrix.
+//
+// Summation order: for a given C(i,j), the pp blocks go in increasing order
+// and p increases inside each block, so the terms are still added in the same
+// order as naive: the result is bit-for-bit the same.
+Matrix multiply_tiled(const Matrix& A, const Matrix& B, std::size_t tile) {
+  // ---- 1. Shapes -------------------------------------------------------------
+  const std::size_t n = A.rows();
+  const std::size_t k = A.cols();
+  const std::size_t m = B.cols();
+
+  // ---- 2. Validate the input ---------------------------------------------------
+  check_multiply_shapes(A, B);
+  if (tile == 0) {
+    // A step of 0 would make the block loops below run forever.
+    throw std::invalid_argument("multiply_tiled: tile size must be at least 1");
+  }
+
+  // ---- 3. Create the output (zero-filled) ------------------------------------
+  Matrix C(n, m);
+
+  // ---- 4. Loop over blocks, then i-k-j inside each block ---------------------
+  for (std::size_t ii = 0; ii < n; ii += tile) {            // block row of C (and A)
+    const std::size_t i_end = std::min(ii + tile, n);
+
+    for (std::size_t jj = 0; jj < m; jj += tile) {          // block column of C (and B)
+      const std::size_t j_end = std::min(jj + tile, m);
+
+      for (std::size_t pp = 0; pp < k; pp += tile) {        // strip of the inner dimension
+        const std::size_t p_end = std::min(pp + tile, k);
+
+        // C(ii.., jj..) += A(ii.., pp..) * B(pp.., jj..), i-k-j order:
+        for (std::size_t i = ii; i < i_end; ++i) {
+          for (std::size_t p = pp; p < p_end; ++p) {
+            const double a = A(i, p);
+            for (std::size_t j = jj; j < j_end; ++j) {
+              C(i, j) += a * B(p, j);
+            }
+          }
+        }
       }
     }
   }

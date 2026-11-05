@@ -1,6 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -25,25 +29,45 @@
       "displayName": "Release",
       "inherits": "base",
       "binaryDir": "${sourceDir}/build",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "release-native",
+      "displayName": "Release (native)",
+      "description": "P1 version 4: Release + -march=native (AVX2/FMA on this CPU). Binaries only run on CPUs with the same features.",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build-native",
+      "cacheVariables": {
+        "NUMCORE_NATIVE": "ON"
+      }
     }
-  ],
-  "buildPresets": [
-    { "name": "debug", "displayName": "Debug", "configurePreset": "debug" },
-    { "name": "release", "displayName": "Release", "configurePreset": "release" }
   ],
   "testPresets": [
     {
       "name": "debug",
       "displayName": "Debug",
       "configurePreset": "debug",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "release",
       "displayName": "Release",
       "configurePreset": "release",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-native",
+      "displayName": "Release (native)",
+      "configurePreset": "release-native",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

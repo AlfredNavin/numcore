@@ -5,6 +5,10 @@ project(numcore VERSION 0.1.0 LANGUAGES CXX)
 option(NUMCORE_BUILD_TESTS "Build the unit tests" ON)
 option(NUMCORE_BUILD_BENCHMARKS "Build the Google Benchmark programs" ON)
 # Off by default on purpose: P1 measures what these flags do.
+# -march=native = "use every instruction THIS CPU has" (AVX2 + FMA on the
+# i7-12700H), instead of the safe default that runs on any x86-64 CPU (SSE2).
+# Binaries built with it may crash on older CPUs, so it's off by default.
+# Use the release-native preset (build-native/) for P1 version 4.
 option(NUMCORE_NATIVE "Compile with -O3 -march=native" OFF)
 
 # ---- Global settings ---------------------------------------------------------
@@ -51,7 +55,17 @@ if(NUMCORE_BUILD_TESTS)
 endif()
 
 # ---- Benchmarks --------------------------------------------------------------
-if(NUMCORE_BUILD_BENCHMARKS)
+# Benchmarks are only built in Release. A Debug build has no optimisation
+# (-O0): every C(i, j) is a real function call and nothing goes in registers,
+# so timings measure the missing optimiser, not the algorithm. Skipping the
+# target entirely means there's nothing to run by mistake (e.g. from CLion's
+# Debug profile), and Debug builds don't download Google Benchmark either.
+if(NUMCORE_BUILD_BENCHMARKS AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(STATUS "numcore: benchmarks skipped (build type is "
+                 "'${CMAKE_BUILD_TYPE}', benchmarks need Release)")
+endif()
+
+if(NUMCORE_BUILD_BENCHMARKS AND CMAKE_BUILD_TYPE STREQUAL "Release")
   include(FetchContent)
   FetchContent_Declare(
     googlebenchmark
