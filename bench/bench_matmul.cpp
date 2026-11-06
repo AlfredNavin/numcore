@@ -94,6 +94,29 @@ BENCHMARK(BM_Tiled)
     ->ArgNames({"n", "tile"})
     ->Unit(benchmark::kMillisecond);
 
+// ---- Version 5: multithreaded (OpenMP) ------------------------------------------
+// Arguments: matrix size n and thread count. Tile fixed at 128 (best in v3/v4).
+//
+// ->UseRealTime() matters here. By default Google Benchmark divides by CPU
+// time, which ADDS UP over all threads: 8 threads busy for 1 s = 8 s of CPU
+// time. That would make FLOPS look 8x too small. Real (wall-clock) time is
+// what you actually wait for, so FLOPS uses that instead.
+//
+// Don't run this under `taskset -c 4`: that allows ONE CPU, so all threads
+// would take turns on it. Use no taskset, or e.g. `taskset -c 0,2,4,6,8,10`
+// (one logical CPU per P-core).
+void BM_Parallel(benchmark::State& state) {
+  const auto threads = static_cast<int>(state.range(1));
+  run_matmul(state, [threads](const Matrix& A, const Matrix& B) {
+    return numcore::multiply_parallel(A, B, 128, threads);
+  });
+}
+BENCHMARK(BM_Parallel)
+    ->ArgsProduct({{512, 1024, 2048}, {1, 2, 4, 6, 8, 12, 20}})
+    ->ArgNames({"n", "threads"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+
 }  // namespace
 
 // No main(): linking benchmark::benchmark_main provides one.

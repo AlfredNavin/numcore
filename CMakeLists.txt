@@ -34,6 +34,14 @@ target_include_directories(numcore PUBLIC
 )
 target_compile_options(numcore PRIVATE -Wall -Wextra -Wpedantic)
 
+# OpenMP (P1 version 5): a compiler feature for running loops on several
+# threads. find_package checks the compiler supports it; linking the
+# OpenMP::OpenMP_CXX target adds -fopenmp when compiling and the OpenMP
+# runtime library (libgomp for GCC) when linking. Without -fopenmp, the
+# `#pragma omp` lines are silently ignored and everything runs on 1 thread.
+find_package(OpenMP REQUIRED)
+target_link_libraries(numcore PRIVATE OpenMP::OpenMP_CXX)
+
 if(NUMCORE_NATIVE)
   target_compile_options(numcore PUBLIC -O3 -march=native)
 endif()

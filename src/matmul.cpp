@@ -11,6 +11,8 @@
 #include <stdexcept>  // std::invalid_argument
 #include <string>     // std::string, std::to_string
 
+#include <omp.h>      // omp_get_max_threads (version 5)
+
 namespace numcore {
 
 // ---- Shared helpers ----------------------------------------------------------
@@ -199,6 +201,114 @@ Matrix multiply_tiled(const Matrix& A, const Matrix& B, std::size_t tile) {
       }
     }
   }
+
+  // ---- 5. Return the result ----------------------------------------------------
+  return C;
+}
+
+// ============================================================================
+// Version 5: multithreaded (OpenMP), built on version 3
+// ============================================================================
+//
+// Versions 1-4 use ONE core. This CPU has 6 P-cores (12 logical CPUs with
+// hyperthreading) + 8 E-cores = 20 logical CPUs, so 19 sat idle.
+//
+// The idea: C is made of independent tile x tile blocks. Block (ii, jj) of C
+// only needs block row ii of A and block column jj of B. So different threads
+// can compute different blocks of C at the same time:
+//
+//            C (1024 x 1024, tile 128 -> 8 x 8 = 64 blocks)
+//        ┌────┬────┬────┬────┬────┬────┬────┬────┐
+//        │ T0 │ T1 │ T2 │ T3 │ T4 │ T5 │ T0 │ T3 │  <- each block is given
+//        ├────┼────┼────┼────┼────┼────┼────┼────┤     to one thread
+//        │ T1 │ T4 │ ...                          │
+//
+//   - READING A and B from many threads at once is safe: nobody changes them.
+//   - WRITING C is safe because each block of C belongs to ONE thread.
+//
+// Why split the (ii, jj) loops and NOT the pp loop:
+//   The pp loop adds partial sums INTO the same block of C:
+//       C(ii, jj) += A(ii, pp) * B(pp, jj)   for pp = 0, T, 2T, ...
+//   If two threads ran different pp for the same block, both would do
+//   "read C(i,j), add, write C(i,j)" at the same moment, and one thread's
+//   addition would overwrite the other's. That's a DATA RACE: wrong answers
+//   that change from run to run. So pp stays inside one thread, in order.
+//
+// The OpenMP line:
+//   #pragma omp parallel for collapse(2) schedule(dynamic) num_threads(t)
+//
+//   parallel for     -> start a team of threads and share out the iterations
+//                       of the next loop between them. At the end of the
+//                       loop every thread waits until all are done (an
+//                       implicit "barrier"), so C is complete afterwards.
+//   collapse(2)      -> treat the ii AND jj loops as one loop of
+//                       (n/T) * (m/T) iterations. Splitting ii alone at 1024
+//                       / tile 128 gives only 8 pieces of work: with 20
+//                       threads, 12 would have nothing to do. collapse(2)
+//                       gives 64 pieces.
+//   schedule(dynamic)-> hand out blocks one at a time: a thread that finishes
+//                       asks for the next one. The alternative,
+//                       schedule(static), gives every thread an equal share
+//                       up front, which is cheaper to organise but bad on this
+//                       CPU: E-cores are slower, so the P-cores would finish
+//                       their share and then wait for the E-cores.
+//   num_threads(t)   -> how many threads in the team.
+//
+// collapse(2) rule: nothing may sit between the two collapsed loops, so i_end
+// is computed inside the jj loop instead of between them.
+//
+// Variables: everything declared OUTSIDE the parallel loop (A, B, C, n, k, m,
+// tile) is SHARED by all threads. Everything declared INSIDE (i_end, i, p, a,
+// ...) is PRIVATE: each thread has its own copy. The loop counters ii and jj
+// are made private automatically.
+Matrix multiply_parallel(const Matrix& A, const Matrix& B, std::size_t tile, int threads) {
+  // ---- 1. Shapes -------------------------------------------------------------
+  const std::size_t n = A.rows();
+  const std::size_t k = A.cols();
+  const std::size_t m = B.cols();
+
+  // ---- 2. Validate the input ---------------------------------------------------
+  // Must happen BEFORE the parallel region: an exception thrown inside a
+  // parallel loop can't escape it (the program would just terminate).
+  check_multiply_shapes(A, B);
+  if (tile == 0) {
+    throw std::invalid_argument("multiply_parallel: tile size must be at least 1");
+  }
+  if (threads < 0) {
+    throw std::invalid_argument("multiply_parallel: threads must be >= 0 (0 = OpenMP default)");
+  }
+  // 0 = "OpenMP default": one per logical CPU, or the OMP_NUM_THREADS value.
+  const int team_size = (threads == 0) ? omp_get_max_threads() : threads;
+
+  // ---- 3. Create the output (zero-filled) ------------------------------------
+  // Created by the main thread, before the threads start; shared by all.
+  Matrix C(n, m);
+
+  // ---- 4. Blocks of C shared between threads; tiled i-k-j inside --------------
+#pragma omp parallel for collapse(2) schedule(dynamic) num_threads(team_size)
+  for (std::size_t ii = 0; ii < n; ii += tile) {            // block row of C
+    for (std::size_t jj = 0; jj < m; jj += tile) {          // block column of C
+      // ---- everything from here down runs inside ONE thread ----
+      const std::size_t i_end = std::min(ii + tile, n);
+      const std::size_t j_end = std::min(jj + tile, m);
+
+      // Same as version 3 from here: walk the inner dimension in strips, in
+      // order, adding into this thread's own block of C.
+      for (std::size_t pp = 0; pp < k; pp += tile) {
+        const std::size_t p_end = std::min(pp + tile, k);
+
+        for (std::size_t i = ii; i < i_end; ++i) {
+          for (std::size_t p = pp; p < p_end; ++p) {
+            const double a = A(i, p);
+            for (std::size_t j = jj; j < j_end; ++j) {
+              C(i, j) += a * B(p, j);
+            }
+          }
+        }
+      }
+    }
+  }
+  // <- implicit barrier: all threads have finished here.
 
   // ---- 5. Return the result ----------------------------------------------------
   return C;

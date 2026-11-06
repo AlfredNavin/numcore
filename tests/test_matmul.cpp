@@ -345,3 +345,103 @@ TEST(MultiplyTiled, ZeroTileThrows) {
   // tile = 0 would make the block loops step by 0 and never finish.
   EXPECT_THROW(multiply_tiled(Matrix(2, 2), Matrix(2, 2), 0), std::invalid_argument);
 }
+
+// =============================================================================
+// Version 5: multiply_parallel
+// =============================================================================
+// Threads add two new ways to go wrong:
+//   1. A DATA RACE (two threads writing the same C(i,j)). It gives wrong
+//      answers only SOMETIMES, depending on timing, so the tests use larger
+//      matrices, many thread counts and repeated runs to give it a chance to
+//      show up.
+//   2. Work that never gets done, or gets done twice, when the number of
+//      blocks doesn't divide evenly between threads (e.g. 3 threads, 7 blocks),
+//      or there are more threads than blocks.
+// Integer inputs: every sum is exact, so EXPECT_EQ against naive.
+// Random reals: with -march=native the compiler may fuse a*b + c into one FMA
+// instruction in some kernels and not others, so rounding can differ from
+// naive in the last bit -> approx_equal. BUT the 1-thread and 8-thread runs of
+// multiply_parallel run the SAME code on each C(i,j), so they must be
+// bit-identical. Any difference there = a race.
+
+using numcore::multiply_parallel;
+
+TEST(MultiplyParallel, HandChecked2x2) {
+  Matrix A{{1, 2},
+           {3, 4}};
+  Matrix B{{5, 6},
+           {7, 8}};
+  Matrix expected{{19, 22},
+                  {43, 50}};
+
+  EXPECT_EQ(multiply_parallel(A, B), expected);        // defaults: tile 128, all threads
+  EXPECT_EQ(multiply_parallel(A, B, 1, 4), expected);  // 4 blocks of 1x1, 4 threads
+}
+
+TEST(MultiplyParallel, MatchesNaiveForManyThreadAndTileCounts) {
+  // Awkward sizes again (primes), so blocks at the edges are partial.
+  Matrix A = make_int_matrix(37, 53, 1);
+  Matrix B = make_int_matrix(53, 29, 2);
+  const Matrix expected = multiply_naive(A, B);
+
+  for (int threads : {1, 2, 3, 4, 7, 20}) {
+    for (std::size_t tile : {1u, 7u, 16u, 64u, 1000u}) {
+      SCOPED_TRACE("threads = " + std::to_string(threads) +
+                   ", tile = " + std::to_string(tile));
+      EXPECT_EQ(multiply_parallel(A, B, tile, threads), expected);
+    }
+  }
+}
+
+TEST(MultiplyParallel, MoreThreadsThanBlocks) {
+  // 10x10 with tile 8 -> 2 x 2 = 4 blocks, but 16 threads: 12 get no work.
+  Matrix A = make_int_matrix(10, 10, 3);
+  Matrix B = make_int_matrix(10, 10, 4);
+
+  EXPECT_EQ(multiply_parallel(A, B, 8, 16), multiply_naive(A, B));
+}
+
+TEST(MultiplyParallel, RandomRealsSameResultWithAnyThreadCount) {
+  // Big enough (200 x 200, tile 16 -> 169 blocks) that threads really do run
+  // at the same time. Repeated, because a race may not show up every run.
+  std::mt19937 rng(11);
+  std::uniform_real_distribution<double> dist(-1.0, 1.0);
+  Matrix A(200, 200);
+  Matrix B(200, 200);
+  for (std::size_t i = 0; i < 200; ++i)
+    for (std::size_t j = 0; j < 200; ++j) {
+      A(i, j) = dist(rng);
+      B(i, j) = dist(rng);
+    }
+  const Matrix one_thread = multiply_parallel(A, B, 16, 1);
+  EXPECT_TRUE(approx_equal(one_thread, multiply_naive(A, B)));
+
+  for (int run = 0; run < 5; ++run) {
+    SCOPED_TRACE("run = " + std::to_string(run));
+    EXPECT_EQ(multiply_parallel(A, B, 16, 8), one_thread);  // exact
+  }
+}
+
+TEST(MultiplyParallel, MatchesNaiveOnVectorShapes) {
+  Matrix row = make_int_matrix(1, 6, 3);
+  Matrix col = make_int_matrix(6, 1, 4);
+
+  EXPECT_EQ(multiply_parallel(row, col, 4, 4), multiply_naive(row, col));  // 1x1
+  EXPECT_EQ(multiply_parallel(col, row, 4, 4), multiply_naive(col, row));  // 6x6
+}
+
+TEST(MultiplyParallel, EmptyInnerDimensionGivesZeros) {
+  EXPECT_EQ(multiply_parallel(Matrix(2, 0), Matrix(0, 3)), Matrix(2, 3));
+}
+
+TEST(MultiplyParallel, ShapeMismatchThrows) {
+  EXPECT_THROW(multiply_parallel(Matrix(2, 3), Matrix(2, 3)), std::invalid_argument);
+}
+
+TEST(MultiplyParallel, ZeroTileThrows) {
+  EXPECT_THROW(multiply_parallel(Matrix(2, 2), Matrix(2, 2), 0), std::invalid_argument);
+}
+
+TEST(MultiplyParallel, NegativeThreadsThrows) {
+  EXPECT_THROW(multiply_parallel(Matrix(2, 2), Matrix(2, 2), 128, -1), std::invalid_argument);
+}

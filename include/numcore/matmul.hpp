@@ -58,4 +58,24 @@ Matrix multiply_ikj(const Matrix& A, const Matrix& B);
 // Throws std::invalid_argument if A.cols() != B.rows() or tile == 0.
 Matrix multiply_tiled(const Matrix& A, const Matrix& B, std::size_t tile = 128);
 
+// C = A * B on several CPU cores at once, using OpenMP.  (P1 version 5)
+//
+// The same tiled algorithm as version 3, but the tile x tile blocks of C are
+// shared out between threads. Each block of C is computed by exactly one
+// thread, so no two threads ever write the same number: no locks needed.
+//
+// `threads` = how many threads to use. 0 (the default) means "let OpenMP
+// decide", which is normally one per logical CPU (20 on this machine), or
+// whatever the OMP_NUM_THREADS environment variable says.
+//
+// Each C(i,j) is computed by one thread, adding its terms in the same p order
+// as multiply_naive, so the result doesn't depend on the thread count, bit for
+// bit. (Versus naive: exact for integers; with -march=native, real inputs can
+// differ in the last bit because of FMA, see the tests.)
+//
+// Throws std::invalid_argument if A.cols() != B.rows(), tile == 0 or
+// threads < 0.
+Matrix multiply_parallel(const Matrix& A, const Matrix& B, std::size_t tile = 128,
+                         int threads = 0);
+
 }  // namespace numcore
