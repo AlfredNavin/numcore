@@ -13,6 +13,8 @@
 
 #include <omp.h>      // omp_get_max_threads (version 5)
 
+#include <Eigen/Core>  // Eigen::Matrix, Eigen::Map, Eigen::setNbThreads (version 6)
+
 namespace numcore {
 
 // ---- Shared helpers ----------------------------------------------------------
@@ -311,6 +313,53 @@ Matrix multiply_parallel(const Matrix& A, const Matrix& B, std::size_t tile, int
   // <- implicit barrier: all threads have finished here.
 
   // ---- 5. Return the result ----------------------------------------------------
+  return C;
+}
+
+// ============================================================================
+// Version 6: Eigen (the professional reference)
+// ============================================================================
+//
+// numcore::Matrix stores numbers row by row in one block of memory.
+// Eigen::Map says to Eigen: "here is a pointer to memory that's already laid
+// out like one of your matrices, use it in place". So no copying: Eigen reads
+// A and B and writes C directly in numcore's storage.
+//
+// Eigen's default storage is column-major (column by column), so the type
+// must say RowMajor, or Eigen would read our rows as columns, i.e. the
+// transpose.
+using EigenRowMajor = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+
+Matrix multiply_eigen(const Matrix& A, const Matrix& B, int threads) {
+  // ---- 1. Shapes, as Eigen's index type (signed, std::ptrdiff_t) ------------
+  const auto n = static_cast<Eigen::Index>(A.rows());
+  const auto k = static_cast<Eigen::Index>(A.cols());
+  const auto m = static_cast<Eigen::Index>(B.cols());
+
+  // ---- 2. Validate the input ---------------------------------------------------
+  check_multiply_shapes(A, B);
+  if (threads < 0) {
+    throw std::invalid_argument("multiply_eigen: threads must be >= 0 (0 = OpenMP default)");
+  }
+
+  // ---- 3. Create the output (zero-filled) ------------------------------------
+  Matrix C(A.rows(), B.cols());
+
+  // ---- 4. Wrap numcore's memory as Eigen matrices (no copies) ---------------
+  const Eigen::Map<const EigenRowMajor> a(A.data(), n, k);
+  const Eigen::Map<const EigenRowMajor> b(B.data(), k, m);
+  Eigen::Map<EigenRowMajor> c(C.data(), n, m);
+
+  // ---- 5. Multiply ---------------------------------------------------------------
+  // Eigen uses OpenMP threads for big products because this file is compiled
+  // with -fopenmp. setNbThreads(0) means "OpenMP's default".
+  Eigen::setNbThreads(threads);
+  // noalias() promises that c doesn't overlap a or b, so Eigen can write
+  // straight into c. (Without it, Eigen computes into a temporary matrix
+  // first and copies, in case c were also an input, as in c = c * b.)
+  c.noalias() = a * b;
+
+  // ---- 6. Return the result ----------------------------------------------------
   return C;
 }
 

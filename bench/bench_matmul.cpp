@@ -70,9 +70,9 @@ void run_matmul(benchmark::State& state, Multiply multiply) {
 // ---- Version 1: naive i-j-k ---------------------------------------------------
 void BM_Naive(benchmark::State& state) { run_matmul(state, numcore::multiply_naive); }
 
-// Sizes from the plan: 256/512/1024 now, 2048 for the final chart.
-// (2048 naive can take a minute per run; add ->Arg(2048) when you're ready.)
-BENCHMARK(BM_Naive)->Arg(256)->Arg(512)->Arg(1024)->Unit(benchmark::kMillisecond);
+// Sizes from the plan: 1024 and 2048 for the final chart, smaller ones for
+// quick checks. (2048 naive takes the better part of a minute per run.)
+BENCHMARK(BM_Naive)->Arg(256)->Arg(512)->Arg(1024)->Arg(2048)->Unit(benchmark::kMillisecond);
 
 // ---- Version 2: i-k-j -----------------------------------------------------------
 void BM_Ikj(benchmark::State& state) { run_matmul(state, numcore::multiply_ikj); }
@@ -113,6 +113,22 @@ void BM_Parallel(benchmark::State& state) {
 }
 BENCHMARK(BM_Parallel)
     ->ArgsProduct({{512, 1024, 2048}, {1, 2, 4, 6, 8, 12, 20}})
+    ->ArgNames({"n", "threads"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+
+// ---- Version 6: Eigen (the reference) ----------------------------------------------
+// Same arguments as BM_Parallel, plus 256, so threads:1 compares Eigen with
+// versions 1-4 and threads:20 compares it with version 5. UseRealTime for the
+// same reason as BM_Parallel.
+void BM_Eigen(benchmark::State& state) {
+  const auto threads = static_cast<int>(state.range(1));
+  run_matmul(state, [threads](const Matrix& A, const Matrix& B) {
+    return numcore::multiply_eigen(A, B, threads);
+  });
+}
+BENCHMARK(BM_Eigen)
+    ->ArgsProduct({{256, 512, 1024, 2048}, {1, 2, 4, 6, 8, 12, 20}})
     ->ArgNames({"n", "threads"})
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);

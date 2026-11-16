@@ -445,3 +445,83 @@ TEST(MultiplyParallel, ZeroTileThrows) {
 TEST(MultiplyParallel, NegativeThreadsThrows) {
   EXPECT_THROW(multiply_parallel(Matrix(2, 2), Matrix(2, 2), 128, -1), std::invalid_argument);
 }
+
+// =============================================================================
+// Version 6: multiply_eigen
+// =============================================================================
+// Eigen is well tested already, so these tests check OUR glue code: the
+// row-major Map (get it wrong and you'd multiply transposes), non-square
+// shapes (mixing up rows/cols would scramble the result), empty matrices and
+// the input checks. Eigen adds the terms in a different order from naive, so
+// random reals use approx_equal. Small integers are still exact.
+
+using numcore::multiply_eigen;
+
+TEST(MultiplyEigen, HandChecked2x2) {
+  Matrix A{{1, 2},
+           {3, 4}};
+  Matrix B{{5, 6},
+           {7, 8}};
+  Matrix expected{{19, 22},
+                  {43, 50}};
+
+  EXPECT_EQ(multiply_eigen(A, B), expected);
+  EXPECT_EQ(multiply_eigen(A, B, 1), expected);
+}
+
+TEST(MultiplyEigen, MatchesNaiveOnNonSquare) {
+  // A non-square A catches a row-major / column-major mix-up: the shapes
+  // wouldn't even line up if Eigen read our rows as columns.
+  Matrix A = make_int_matrix(37, 53, 1);
+  Matrix B = make_int_matrix(53, 29, 2);
+
+  EXPECT_EQ(multiply_eigen(A, B, 1), multiply_naive(A, B));
+  EXPECT_EQ(multiply_eigen(A, B, 4), multiply_naive(A, B));
+}
+
+TEST(MultiplyEigen, MatchesNaiveOnRandomReals) {
+  // 300 x 300 is big enough that Eigen really uses its blocked, multithreaded
+  // code path (tiny products take a simpler route).
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<double> dist(-1.0, 1.0);
+  Matrix A(300, 250);
+  Matrix B(250, 310);
+  for (std::size_t i = 0; i < A.rows(); ++i)
+    for (std::size_t j = 0; j < A.cols(); ++j) A(i, j) = dist(rng);
+  for (std::size_t i = 0; i < B.rows(); ++i)
+    for (std::size_t j = 0; j < B.cols(); ++j) B(i, j) = dist(rng);
+  const Matrix expected = multiply_naive(A, B);
+
+  for (int threads : {0, 1, 8}) {
+    SCOPED_TRACE("threads = " + std::to_string(threads));
+    EXPECT_TRUE(approx_equal(multiply_eigen(A, B, threads), expected));
+  }
+}
+
+TEST(MultiplyEigen, MatchesNaiveOnVectorShapes) {
+  Matrix row = make_int_matrix(1, 6, 3);
+  Matrix col = make_int_matrix(6, 1, 4);
+
+  EXPECT_EQ(multiply_eigen(row, col), multiply_naive(row, col));  // 1x1
+  EXPECT_EQ(multiply_eigen(col, row), multiply_naive(col, row));  // 6x6
+}
+
+TEST(MultiplyEigen, IdentityLeavesMatrixUnchanged) {
+  Matrix A{{1, -2, 3},
+           {4, 5, -6}};
+
+  EXPECT_EQ(multiply_eigen(A, Matrix::identity(3)), A);
+  EXPECT_EQ(multiply_eigen(Matrix::identity(2), A), A);
+}
+
+TEST(MultiplyEigen, EmptyInnerDimensionGivesZeros) {
+  EXPECT_EQ(multiply_eigen(Matrix(2, 0), Matrix(0, 3)), Matrix(2, 3));
+}
+
+TEST(MultiplyEigen, ShapeMismatchThrows) {
+  EXPECT_THROW(multiply_eigen(Matrix(2, 3), Matrix(2, 3)), std::invalid_argument);
+}
+
+TEST(MultiplyEigen, NegativeThreadsThrows) {
+  EXPECT_THROW(multiply_eigen(Matrix(2, 2), Matrix(2, 2), -1), std::invalid_argument);
+}

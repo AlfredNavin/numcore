@@ -78,4 +78,28 @@ Matrix multiply_tiled(const Matrix& A, const Matrix& B, std::size_t tile = 128);
 Matrix multiply_parallel(const Matrix& A, const Matrix& B, std::size_t tile = 128,
                          int threads = 0);
 
+// C = A * B using the Eigen library.  (P1 version 6: the reference)
+//
+// Not "my" algorithm: this hands the multiply to Eigen, a library tuned for
+// years, to see how far versions 1-5 are from a professional implementation.
+// Eigen's matrix multiply adds what numcore's versions don't have:
+//   - register blocking: a small micro-kernel that keeps a block of C (e.g.
+//     4 x 12 doubles) in CPU registers the whole time, so each value loaded
+//     from A or B feeds several FMAs before the next load;
+//   - packing: copies blocks of A and B into contiguous, kernel-friendly order
+//     first, so the micro-kernel reads memory strictly in sequence;
+//   - block sizes picked from this CPU's cache sizes at run time.
+// No data is copied in or out: Eigen works directly on numcore's row-major
+// storage (Eigen::Map).
+//
+// `threads`: 0 (default) = OpenMP default (all logical CPUs or OMP_NUM_THREADS),
+// 1 = single-threaded. Note: this sets Eigen's thread count globally
+// (Eigen::setNbThreads), so don't call it from several threads at once.
+//
+// Result: equal to multiply_naive up to rounding (Eigen adds the terms in a
+// different order) -> compare with approx_equal for real-valued inputs.
+//
+// Throws std::invalid_argument if A.cols() != B.rows() or threads < 0.
+Matrix multiply_eigen(const Matrix& A, const Matrix& B, int threads = 0);
+
 }  // namespace numcore

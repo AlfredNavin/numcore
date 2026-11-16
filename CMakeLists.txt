@@ -42,6 +42,30 @@ target_compile_options(numcore PRIVATE -Wall -Wextra -Wpedantic)
 find_package(OpenMP REQUIRED)
 target_link_libraries(numcore PRIVATE OpenMP::OpenMP_CXX)
 
+# Eigen (P1 version 6): a widely used C++ linear-algebra library, used here
+# as the "professional" matrix multiply to compare against. Header-only: there
+# is nothing to compile or link, just headers to #include.
+# Uses the system copy if installed (Ubuntu: sudo apt install libeigen3-dev),
+# otherwise downloads it. Linked PRIVATE: only src/matmul.cpp sees Eigen; the
+# public header numcore/matmul.hpp doesn't mention it.
+find_package(Eigen3 3.4 QUIET NO_MODULE)
+if(NOT TARGET Eigen3::Eigen)
+  message(STATUS "numcore: Eigen 3.4 not found on the system, downloading it")
+  include(FetchContent)
+  FetchContent_Declare(
+    eigen
+    URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    # Only download; don't run Eigen's own (large) CMake project.
+    SOURCE_SUBDIR do-not-build
+  )
+  FetchContent_MakeAvailable(eigen)
+  add_library(Eigen3::Eigen INTERFACE IMPORTED)
+  set_target_properties(Eigen3::Eigen PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${eigen_SOURCE_DIR}")
+endif()
+target_link_libraries(numcore PRIVATE Eigen3::Eigen)
+
 if(NUMCORE_NATIVE)
   target_compile_options(numcore PUBLIC -O3 -march=native)
 endif()
